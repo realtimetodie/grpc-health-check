@@ -1,0 +1,69 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+jobs:
+  cargo:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v2
+      - if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt install -y protobuf-compiler
+          echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
+      - if: matrix.os == 'macos-latest'
+        run: |
+          brew install protobuf
+          echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Run cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+      - name: Run cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -Dwarnings
+  bazel:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            bazel-cache: ~/.cache/bazel
+          - os: macos-latest
+            bazel-cache: /var/tmp/_bazel_runner/cache
+    steps:
+      - uses: actions/checkout@v2
+      - name: Mount bazel cache
+        uses: actions/cache@v1
+        with:
+          path: ${{ matrix.bazel-cache }}
+          key: ${{ runner.os }}-bazel-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-bazel-
+      - name: Run bazel build
+        run: bazel build //... --announce_rc --noshow_progress --verbose_failures --local_ram_resources=7000
+      - name: Run bazel test
+        run: bazel test //... --announce_rc --noshow_progress --verbose_failures --local_ram_resources=7000 --test_output=all
+      - name: Run bazel coverage
+        if: matrix.os == 'ubuntu-latest'
+        run: bazel coverage //... --announce_rc --noshow_progress --verbose_failures --local_ram_resources=7000 --test_output=all
